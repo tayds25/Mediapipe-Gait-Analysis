@@ -1,5 +1,14 @@
 """
-Stage 1: Data Ingestion Module
+Stage 1: Data Ingestion Module.
+
+This module is responsible for acquiring video frames from either a live
+webcam stream or an offline MP4 file and emitting them as discrete,
+time-stamped packets for downstream processing.
+
+Within the thesis pipeline, this stage standardizes frame delivery at a target
+rate (default 30 FPS), keeps OpenCV capture concerns isolated from analytical
+logic, and provides a safe smoke-test entry point for validating camera/video
+input before pose estimation and kinematic computations.
 """
 
 from __future__ import annotations
