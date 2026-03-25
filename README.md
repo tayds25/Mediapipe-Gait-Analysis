@@ -68,10 +68,7 @@ python -m venv venv
 **Step 4: Activate the Environment**  
 ```
 # For Windows
-.\venv\Scripts\activate
-
-# For Linux
-source venv/bin/activate
+.\.venv\Scripts\activate
 ```
 
 **Step 5: Install Dependencies**  
