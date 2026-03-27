@@ -29,7 +29,8 @@ class GaitAnalysisDashboard:
 		self.root = tk.Tk()
 		self.root.title("Kinematic Gait Analysis System")
 		self.root.geometry("1024x768")
-		self.root.resizable(False, False)
+		self.root.resizable(True, True)
+		self.root.minsize(1024, 768)
 		self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
 		self._is_running: bool = True
@@ -70,6 +71,7 @@ class GaitAnalysisDashboard:
 
 		left_frame = ttk.Frame(container, style="Panel.TFrame", padding=10)
 		left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+		left_frame.pack_propagate(False)
 
 		right_frame = ttk.Frame(container, style="Panel.TFrame", width=300, padding=16)
 		right_frame.pack(side=tk.RIGHT, fill=tk.Y)
@@ -111,8 +113,8 @@ class GaitAnalysisDashboard:
 		if frame_bgr.ndim != 3 or frame_bgr.shape[2] != 3:
 			raise ValueError("frame_bgr must have shape (H, W, 3).")
 
-		target_w = max(self.video_label.winfo_width(), 1)
-		target_h = max(self.video_label.winfo_height(), 1)
+		target_w = max(self.video_label.master.winfo_width(), 1)
+		target_h = max(self.video_label.master.winfo_height(), 1)
 
 		frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 		resized = cv2.resize(frame_rgb, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
