@@ -10,7 +10,6 @@ This script integrates all thesis pipeline stages in real time:
 from __future__ import annotations
 
 import argparse
-import time
 
 import mediapipe as mp
 
@@ -71,10 +70,6 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 
 	drawing_utils = mp.solutions.drawing_utils
 
-	# Light runtime telemetry for monitoring loop timing performance.
-	last_fps_time = time.perf_counter()
-	frames_since_fps_update = 0
-
 	try:
 		with VideoIngestion(IngestionConfig(source=source, target_fps=target_fps)) as stream:
 			with PoseEstimator() as pose_estimator:
@@ -102,14 +97,7 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 							left_angles=left_angles,
 							right_angles=right_angles,
 						)
-						pose_buffer.clear()
-
-					frames_since_fps_update += 1
-					now = time.perf_counter()
-					elapsed = now - last_fps_time
-					if elapsed >= 0.5:
-						frames_since_fps_update = 0
-						last_fps_time = now
+					pose_buffer.clear()
 
 					dashboard.update_display(
 						frame_bgr=packet.frame_bgr,
