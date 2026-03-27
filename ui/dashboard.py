@@ -35,6 +35,7 @@ class GaitAnalysisDashboard:
 
 		self._is_running: bool = True
 		self._photo_ref: ImageTk.PhotoImage | None = None
+		self.start_requested: bool = False
 
 		self._build_layout()
 
@@ -96,6 +97,21 @@ class GaitAnalysisDashboard:
 		self.buffer_label = ttk.Label(right_frame, text="Buffer: 0 frames", style="MetricName.TLabel")
 		self.buffer_label.pack(anchor="w", pady=(20, 0))
 
+		self.recording_indicator = ttk.Label(right_frame, text="Waiting...", style="MetricName.TLabel")
+		self.recording_indicator.pack(anchor="w", pady=(16, 0))
+
+		self.start_button = ttk.Button(
+			right_frame,
+			text="Start Trial",
+			command=self._on_start_clicked,
+		)
+		self.start_button.pack(fill=tk.X, pady=(16, 0))
+
+	def _on_start_clicked(self) -> None:
+		"""Handle the Start Trial button click."""
+		self.start_requested = True
+		self.start_button.config(state="disabled")
+
 	def _add_metric_row(self, parent: ttk.Frame, name: str, default_value: str) -> ttk.Label:
 		"""Create a named metric row and return its value label."""
 
@@ -126,6 +142,7 @@ class GaitAnalysisDashboard:
 		frame_bgr: np.ndarray,
 		diagnostic_result: DiagnosticResult | None,
 		buffer_count: int,
+		recording_state: str = "IDLE",
 	) -> None:
 		"""Update video pane and clinical metric labels.
 
@@ -133,6 +150,7 @@ class GaitAnalysisDashboard:
 			frame_bgr: Current OpenCV frame in BGR format.
 			diagnostic_result: Latest diagnostic output, or None while buffering.
 			buffer_count: Number of valid pose frames currently buffered.
+			recording_state: Current state string ("IDLE", "COUNTDOWN", "RECORDING").
 
 		Raises:
 			ValueError: If frame_bgr is invalid.
@@ -162,6 +180,14 @@ class GaitAnalysisDashboard:
 			self.right_peak_value_label.configure(text=f"{diagnostic_result.peak_flexion_right:.2f} deg")
 
 		self.buffer_label.configure(text=f"Buffer: {buffer_count} frames")
+
+		if recording_state == "IDLE":
+			self.recording_indicator.configure(text="Waiting...", foreground="#6b7280")
+			self.start_button.config(state="normal")
+		elif recording_state == "COUNTDOWN":
+			self.recording_indicator.configure(text="Starting...", foreground="#b45309")
+		elif recording_state == "RECORDING":
+			self.recording_indicator.configure(text="🔴 RECORDING", foreground="#b91c1c")
 
 		if self._is_running:
 			self.root.update_idletasks()

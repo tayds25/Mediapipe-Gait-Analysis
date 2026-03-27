@@ -10,7 +10,9 @@ This script integrates all thesis pipeline stages in real time:
 from __future__ import annotations
 
 import argparse
+import time
 
+import cv2
 import mediapipe as mp
 
 from src.classification import DiagnosticResult, GaitClassifier
@@ -20,6 +22,11 @@ from src.pose_estimation import PoseEstimator, PoseResult
 from ui.dashboard import GaitAnalysisDashboard
 
 ANALYSIS_WINDOW_FRAMES: int = 90
+COUNTDOWN_DURATION: float = 5.0
+
+STATE_IDLE: str = "IDLE"
+STATE_COUNTDOWN: str = "COUNTDOWN"
+STATE_RECORDING: str = "RECORDING"
 
 
 def _parse_source(value: str) -> int | str:
@@ -51,7 +58,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
 
 
 def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
-	"""Run the complete 4-stage gait analysis loop.
+	"""Run the complete 4-stage gait analysis loop with state machine.
 
 	Args:
 		source: Webcam index or MP4 path.
@@ -63,6 +70,9 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 
 	pose_buffer: list[PoseResult] = []
 	last_result: DiagnosticResult | None = None
+
+	current_state: str = STATE_IDLE
+	countdown_start_time: float = 0.0
 
 	kinematic_analyzer = KinematicAnalyzer(visibility_threshold=0.5)
 	gait_classifier = GaitClassifier(abnormal_threshold=10.0)
@@ -83,26 +93,62 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 							mp.solutions.pose.POSE_CONNECTIONS,
 						)
 
-					if pose_result is not None:
-						pose_buffer.append(pose_result)
+					if dashboard.start_requested and current_state == STATE_IDLE:
+						current_state = STATE_COUNTDOWN
+						countdown_start_time = time.perf_counter()
+						dashboard.start_requested = False
+						pose_buffer.clear()
 
-					if len(pose_buffer) >= ANALYSIS_WINDOW_FRAMES:
-						left_leg_signal = [sample.left_leg for sample in pose_buffer]
-						right_leg_signal = [sample.right_leg for sample in pose_buffer]
+					if current_state == STATE_COUNTDOWN:
+						elapsed = time.perf_counter() - countdown_start_time
+						remaining = max(0.0, COUNTDOWN_DURATION - elapsed)
+						if remaining > 0:
+							countdown_text = f"Starting in {int(remaining) + 1}..."
+							cv2.putText(
+								packet.frame_bgr,
+								countdown_text,
+								(packet.frame_bgr.shape[1] // 2 - 150, packet.frame_bgr.shape[0] // 2),
+								cv2.FONT_HERSHEY_SIMPLEX,
+								2.0,
+								(0, 255, 255),
+								3,
+							)
+						else:
+							current_state = STATE_RECORDING
 
-						left_angles = kinematic_analyzer.process_leg_signal(left_leg_signal)
-						right_angles = kinematic_analyzer.process_leg_signal(right_leg_signal)
-
-						last_result = gait_classifier.evaluate_symmetry(
-							left_angles=left_angles,
-							right_angles=right_angles,
+					if current_state == STATE_RECORDING:
+						cv2.putText(
+							packet.frame_bgr,
+							"REC",
+							(packet.frame_bgr.shape[1] - 120, 40),
+							cv2.FONT_HERSHEY_SIMPLEX,
+							1.2,
+							(0, 0, 255),
+							2,
 						)
-					pose_buffer.clear()
+
+						if pose_result is not None:
+							pose_buffer.append(pose_result)
+
+						if len(pose_buffer) >= ANALYSIS_WINDOW_FRAMES:
+							left_leg_signal = [sample.left_leg for sample in pose_buffer]
+							right_leg_signal = [sample.right_leg for sample in pose_buffer]
+
+							left_angles = kinematic_analyzer.process_leg_signal(left_leg_signal)
+							right_angles = kinematic_analyzer.process_leg_signal(right_leg_signal)
+
+							last_result = gait_classifier.evaluate_symmetry(
+								left_angles=left_angles,
+								right_angles=right_angles,
+							)
+							current_state = STATE_IDLE
+							pose_buffer.clear()
 
 					dashboard.update_display(
 						frame_bgr=packet.frame_bgr,
 						diagnostic_result=last_result,
 						buffer_count=len(pose_buffer),
+						recording_state=current_state,
 					)
 					if not dashboard._is_running:
 						break
