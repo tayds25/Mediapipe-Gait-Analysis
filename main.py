@@ -12,13 +12,13 @@ from __future__ import annotations
 import argparse
 import time
 
-import cv2
 import mediapipe as mp
 
 from src.classification import DiagnosticResult, GaitClassifier
 from src.ingestion import IngestionConfig, VideoIngestion
 from src.kinematics import KinematicAnalyzer
 from src.pose_estimation import PoseEstimator, PoseResult
+from ui.dashboard import GaitAnalysisDashboard
 
 ANALYSIS_WINDOW_FRAMES: int = 90
 
@@ -51,37 +51,6 @@ def _build_cli_parser() -> argparse.ArgumentParser:
 	return parser
 
 
-def _build_status_text(
-	last_result: DiagnosticResult | None,
-	buffer_size: int,
-	window_size: int,
-) -> tuple[str, tuple[int, int, int]]:
-	"""Create HUD status text and display color.
-
-	Args:
-		last_result: Most recent diagnostic result if available.
-		buffer_size: Current number of valid pose frames in analysis buffer.
-		window_size: Required frame count for one analysis window.
-
-	Returns:
-		Tuple ``(text, bgr_color)`` for OpenCV overlay.
-	"""
-
-	if last_result is None:
-		return (f"Status: Buffering... ({buffer_size}/{window_size})", (0, 255, 255))
-
-	if last_result.is_abnormal:
-		return (
-			f"Status: Abnormal Gait (SI: {last_result.symmetry_index:.1f}%)",
-			(0, 0, 255),
-		)
-
-	return (
-		f"Status: Normal Gait (SI: {last_result.symmetry_index:.1f}%)",
-		(0, 255, 0),
-	)
-
-
 def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 	"""Run the complete 4-stage gait analysis loop.
 
@@ -98,14 +67,13 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 
 	kinematic_analyzer = KinematicAnalyzer(visibility_threshold=0.5)
 	gait_classifier = GaitClassifier(abnormal_threshold=10.0)
+	dashboard = GaitAnalysisDashboard()
 
 	drawing_utils = mp.solutions.drawing_utils
-	window_name = "2D Kinematic Gait Analysis - press q to quit"
 
 	# Light runtime telemetry for monitoring loop timing performance.
 	last_fps_time = time.perf_counter()
 	frames_since_fps_update = 0
-	display_fps = 0.0
 
 	try:
 		with VideoIngestion(IngestionConfig(source=source, target_fps=target_fps)) as stream:
@@ -136,53 +104,23 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 						)
 						pose_buffer.clear()
 
-					status_text, status_color = _build_status_text(
-						last_result=last_result,
-						buffer_size=len(pose_buffer),
-						window_size=ANALYSIS_WINDOW_FRAMES,
-					)
-
 					frames_since_fps_update += 1
 					now = time.perf_counter()
 					elapsed = now - last_fps_time
 					if elapsed >= 0.5:
-						display_fps = frames_since_fps_update / elapsed
 						frames_since_fps_update = 0
 						last_fps_time = now
 
-					cv2.putText(
-						packet.frame_bgr,
-						status_text,
-						(20, 35),
-						cv2.FONT_HERSHEY_SIMPLEX,
-						0.7,
-						status_color,
-						2,
-						cv2.LINE_AA,
+					dashboard.update_display(
+						frame_bgr=packet.frame_bgr,
+						diagnostic_result=last_result,
+						buffer_count=len(pose_buffer),
 					)
-					cv2.putText(
-						packet.frame_bgr,
-						f"FPS: {display_fps:.1f}",
-						(20, 65),
-						cv2.FONT_HERSHEY_SIMPLEX,
-						0.6,
-						(255, 255, 255),
-						2,
-						cv2.LINE_AA,
-					)
-
-					cv2.imshow(window_name, packet.frame_bgr)
-					if cv2.waitKey(1) & 0xFF == ord("q"):
+					if not dashboard._is_running:
 						break
 	except (RuntimeError, ValueError, FileNotFoundError) as exc:
 		print(f"[main] pipeline error: {exc}")
 		return 1
-	except cv2.error as exc:
-		print("[main] OpenCV display unavailable.")
-		print(f"[main] detail: {exc}")
-		return 1
-	finally:
-		cv2.destroyAllWindows()
 
 	return 0
 
