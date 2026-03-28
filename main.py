@@ -14,6 +14,7 @@ import time
 
 import cv2
 import mediapipe as mp
+import numpy as np
 
 from src.classification import DiagnosticResult, GaitClassifier
 from src.ingestion import IngestionConfig, VideoIngestion
@@ -101,17 +102,46 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 
 					if current_state == STATE_COUNTDOWN:
 						elapsed = time.perf_counter() - countdown_start_time
-						remaining = max(0.0, COUNTDOWN_DURATION - elapsed)
-						if remaining > 0:
-							countdown_text = f"Starting in {int(remaining) + 1}..."
+						countdown_time = max(0.0, COUNTDOWN_DURATION - elapsed)
+						if countdown_time > 0:
+							seconds_left = int(np.ceil(countdown_time))
+							countdown_text = f"Starting in: {seconds_left}"
+							text_size, baseline = cv2.getTextSize(
+								countdown_text,
+								cv2.FONT_HERSHEY_SIMPLEX,
+								0.8,
+								2,
+							)
+							text_width, text_height = text_size
+							padding = 15
+							badge_width = text_width + (2 * padding)
+							badge_height = text_height + (2 * padding)
+
+							frame_height, frame_width = packet.frame_bgr.shape[:2]
+							badge_x1 = max((frame_width - badge_width) // 2, 0)
+							badge_y1 = max(int(0.05 * frame_height), 0)
+							badge_x2 = min(badge_x1 + badge_width, frame_width)
+							badge_y2 = min(badge_y1 + badge_height, frame_height)
+
+							cv2.rectangle(
+								packet.frame_bgr,
+								(badge_x1, badge_y1),
+								(badge_x2, badge_y2),
+								(40, 40, 40),
+								thickness=-1,
+							)
+
+							text_x = badge_x1 + (badge_width - text_width) // 2
+							text_y = badge_y1 + padding + text_height
 							cv2.putText(
 								packet.frame_bgr,
 								countdown_text,
-								(packet.frame_bgr.shape[1] // 2 - 150, packet.frame_bgr.shape[0] // 2),
+								(text_x, text_y),
 								cv2.FONT_HERSHEY_SIMPLEX,
-								2.0,
-								(0, 255, 255),
-								3,
+								0.8,
+								(255, 255, 255),
+								2,
+								cv2.LINE_AA,
 							)
 						else:
 							current_state = STATE_RECORDING
