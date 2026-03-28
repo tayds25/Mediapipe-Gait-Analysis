@@ -42,29 +42,44 @@ class GaitAnalysisDashboard:
 	def _build_layout(self) -> None:
 		"""Construct and style the dashboard layout."""
 
-		self.root.configure(bg="#f4f6f8")
+		self.root.configure(bg="#27374D")
 		style = ttk.Style(self.root)
 		style.theme_use("clam")
 
-		style.configure("Dashboard.TFrame", background="#f4f6f8")
-		style.configure("Panel.TFrame", background="#ffffff", relief="flat")
+		style.configure("Dashboard.TFrame", background="#27374D")
+		style.configure("Panel.TFrame", background="#1C283B", relief="flat")
 		style.configure(
 			"Heading.TLabel",
-			background="#ffffff",
-			foreground="#1f2937",
+			background="#1C283B",
+			foreground="#FFFFFF",
 			font=("Segoe UI", 16, "bold"),
 		)
 		style.configure(
 			"MetricName.TLabel",
-			background="#ffffff",
-			foreground="#4b5563",
+			background="#1C283B",
+			foreground="#9BA4B5",
 			font=("Segoe UI", 11, "normal"),
 		)
 		style.configure(
 			"MetricValue.TLabel",
-			background="#ffffff",
-			foreground="#111827",
+			background="#1C283B",
+			foreground="#FFFFFF",
 			font=("Segoe UI", 13, "bold"),
+		)
+		style.configure(
+			"Primary.TButton",
+			background="#526D82",
+			foreground="#FFFFFF",
+			borderwidth=0,
+			focusthickness=0,
+			focuscolor="#526D82",
+			font=("Segoe UI", 11, "bold"),
+			padding=(12, 10),
+		)
+		style.map(
+			"Primary.TButton",
+			background=[("active", "#5E7B93"), ("pressed", "#42586B"), ("disabled", "#3A4D5F")],
+			foreground=[("disabled", "#D1D5DB")],
 		)
 
 		container = ttk.Frame(self.root, style="Dashboard.TFrame", padding=12)
@@ -80,8 +95,8 @@ class GaitAnalysisDashboard:
 
 		self.video_label = tk.Label(
 			left_frame,
-			bg="#111827",
-			fg="#e5e7eb",
+			bg="#000000",
+			fg="#9BA4B5",
 			text="Video stream will appear here",
 			font=("Segoe UI", 14, "normal"),
 		)
@@ -103,6 +118,7 @@ class GaitAnalysisDashboard:
 		self.start_button = ttk.Button(
 			right_frame,
 			text="Start Trial",
+			style="Primary.TButton",
 			command=self._on_start_clicked,
 		)
 		self.start_button.pack(fill=tk.X, pady=(16, 0))
@@ -165,15 +181,15 @@ class GaitAnalysisDashboard:
 		self.video_label.configure(image=photo, text="")
 
 		if diagnostic_result is None:
-			self.status_value_label.configure(text="Buffering...", foreground="#b45309")
+			self.status_value_label.configure(text="Buffering...", foreground="#FBBF24")
 			self.symmetry_value_label.configure(text="N/A")
 			self.left_peak_value_label.configure(text="N/A")
 			self.right_peak_value_label.configure(text="N/A")
 		else:
 			if diagnostic_result.is_abnormal:
-				self.status_value_label.configure(text="Abnormal", foreground="#b91c1c")
+				self.status_value_label.configure(text="Abnormal", foreground="#EF4444")
 			else:
-				self.status_value_label.configure(text="Normal", foreground="#15803d")
+				self.status_value_label.configure(text="Normal", foreground="#10B981")
 
 			self.symmetry_value_label.configure(text=f"{diagnostic_result.symmetry_index:.2f}%")
 			self.left_peak_value_label.configure(text=f"{diagnostic_result.peak_flexion_left:.2f} deg")
@@ -182,12 +198,12 @@ class GaitAnalysisDashboard:
 		self.buffer_label.configure(text=f"Buffer: {buffer_count} frames")
 
 		if recording_state == "IDLE":
-			self.recording_indicator.configure(text="Waiting...", foreground="#6b7280")
+			self.recording_indicator.configure(text="Waiting...", foreground="#FBBF24")
 			self.start_button.config(state="normal")
 		elif recording_state == "COUNTDOWN":
-			self.recording_indicator.configure(text="Starting...", foreground="#b45309")
+			self.recording_indicator.configure(text="Starting...", foreground="#FBBF24")
 		elif recording_state == "RECORDING":
-			self.recording_indicator.configure(text="🔴 RECORDING", foreground="#b91c1c")
+			self.recording_indicator.configure(text="🔴 RECORDING", foreground="#EF4444")
 
 		if self._is_running:
 			self.root.update_idletasks()
