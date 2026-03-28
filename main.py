@@ -61,12 +61,13 @@ def _build_cli_parser() -> argparse.ArgumentParser:
 	return parser
 
 
-def _log_to_csv(result: DiagnosticResult, log_path: Path) -> None:
+def _log_to_csv(result: DiagnosticResult, log_path: Path, trial_num: int) -> None:
 	"""Append a single diagnostic result row to the persistent CSV log.
 
 	Args:
 		result: Final bilateral gait diagnosis for the completed trial window.
 		log_path: Destination CSV path used for longitudinal clinical audit.
+		trial_num: Session-local trial number for the completed recording.
 	"""
 
 	file_exists = log_path.exists()
@@ -75,7 +76,9 @@ def _log_to_csv(result: DiagnosticResult, log_path: Path) -> None:
 		if (not file_exists) or log_path.stat().st_size == 0:
 			writer.writerow(
 				[
-					"Timestamp",
+					"Trial_Number",
+					"Date",
+					"Time",
 					"Peak_Flexion_Left",
 					"Peak_Flexion_Right",
 					"Symmetry_Index",
@@ -83,10 +86,13 @@ def _log_to_csv(result: DiagnosticResult, log_path: Path) -> None:
 				]
 			)
 
+		now = datetime.datetime.now()
 		diagnosis = "Abnormal" if result.is_abnormal else "Normal"
 		writer.writerow(
 			[
-				datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+				trial_num,
+				now.strftime("%Y-%m-%d"),
+				now.strftime("%H:%M:%S"),
 				f"{result.peak_flexion_left:.2f}",
 				f"{result.peak_flexion_right:.2f}",
 				f"{result.symmetry_index:.2f}",
@@ -117,7 +123,9 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 	live_recordings_dir = Path("data/live_recordings")
 	output_logs_dir.mkdir(parents=True, exist_ok=True)
 	live_recordings_dir.mkdir(parents=True, exist_ok=True)
-	log_file = output_logs_dir / "gait_analysis_logs.csv"
+	session_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+	log_file = Path(f"data/output_logs/session_{session_time}.csv")
+	trial_counter = 1
 
 	kinematic_analyzer = KinematicAnalyzer(visibility_threshold=0.5)
 	gait_classifier = GaitClassifier(abnormal_threshold=10.0)
@@ -229,7 +237,8 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 								left_angles=left_angles,
 								right_angles=right_angles,
 							)
-							_log_to_csv(last_result, log_file)
+							_log_to_csv(result=last_result, log_path=log_file, trial_num=trial_counter)
+							trial_counter += 1
 							current_state = STATE_IDLE
 							pose_buffer.clear()
 							if video_writer is not None:
