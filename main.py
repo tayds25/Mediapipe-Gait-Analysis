@@ -10,7 +10,10 @@ This script integrates all thesis pipeline stages in real time:
 from __future__ import annotations
 
 import argparse
+import csv
+import datetime
 import time
+from pathlib import Path
 
 import cv2
 import mediapipe as mp
@@ -58,6 +61,40 @@ def _build_cli_parser() -> argparse.ArgumentParser:
 	return parser
 
 
+def _log_to_csv(result: DiagnosticResult, log_path: Path) -> None:
+	"""Append a single diagnostic result row to the persistent CSV log.
+
+	Args:
+		result: Final bilateral gait diagnosis for the completed trial window.
+		log_path: Destination CSV path used for longitudinal clinical audit.
+	"""
+
+	file_exists = log_path.exists()
+	with log_path.open("a", newline="", encoding="utf-8") as csv_file:
+		writer = csv.writer(csv_file)
+		if (not file_exists) or log_path.stat().st_size == 0:
+			writer.writerow(
+				[
+					"Timestamp",
+					"Peak_Flexion_Left",
+					"Peak_Flexion_Right",
+					"Symmetry_Index",
+					"Diagnosis",
+				]
+			)
+
+		diagnosis = "Abnormal" if result.is_abnormal else "Normal"
+		writer.writerow(
+			[
+				datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+				f"{result.peak_flexion_left:.2f}",
+				f"{result.peak_flexion_right:.2f}",
+				f"{result.symmetry_index:.2f}",
+				diagnosis,
+			]
+		)
+
+
 def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 	"""Run the complete 4-stage gait analysis loop with state machine.
 
@@ -71,9 +108,16 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 
 	pose_buffer: list[PoseResult] = []
 	last_result: DiagnosticResult | None = None
+	video_writer: cv2.VideoWriter | None = None
 
 	current_state: str = STATE_IDLE
 	countdown_start_time: float = 0.0
+
+	output_logs_dir = Path("data/output_logs")
+	live_recordings_dir = Path("data/live_recordings")
+	output_logs_dir.mkdir(parents=True, exist_ok=True)
+	live_recordings_dir.mkdir(parents=True, exist_ok=True)
+	log_file = output_logs_dir / "gait_analysis_logs.csv"
 
 	kinematic_analyzer = KinematicAnalyzer(visibility_threshold=0.5)
 	gait_classifier = GaitClassifier(abnormal_threshold=10.0)
@@ -145,8 +189,22 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 							)
 						else:
 							current_state = STATE_RECORDING
+							filename = f"recording_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+							save_path = str(live_recordings_dir / filename)
+							frame_size = (packet.frame_bgr.shape[1], packet.frame_bgr.shape[0])
+							video_writer = cv2.VideoWriter(
+								save_path,
+								cv2.VideoWriter_fourcc(*"mp4v"),
+								target_fps,
+								frame_size,
+							)
+							if not video_writer.isOpened():
+								raise RuntimeError(f"Failed to open video writer at: {save_path}")
 
 					if current_state == STATE_RECORDING:
+						if video_writer is not None:
+							video_writer.write(packet.frame_bgr)
+
 						cv2.putText(
 							packet.frame_bgr,
 							"REC",
@@ -171,8 +229,12 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 								left_angles=left_angles,
 								right_angles=right_angles,
 							)
+							_log_to_csv(last_result, log_file)
 							current_state = STATE_IDLE
 							pose_buffer.clear()
+							if video_writer is not None:
+								video_writer.release()
+								video_writer = None
 
 					dashboard.update_display(
 						frame_bgr=packet.frame_bgr,
@@ -185,6 +247,9 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 	except (RuntimeError, ValueError, FileNotFoundError) as exc:
 		print(f"[main] pipeline error: {exc}")
 		return 1
+	finally:
+		if video_writer is not None:
+			video_writer.release()
 
 	return 0
 

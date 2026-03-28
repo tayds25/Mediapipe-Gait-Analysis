@@ -47,3 +47,4 @@ venv.bak/
 # Video Datasets and Exports
 data/raw_gavd_files/*.mp4
 data/live_recordings/*.mp4
+data/output_logs/*.csv
