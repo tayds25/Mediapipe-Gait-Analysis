@@ -146,6 +146,35 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 	drawing_utils = mp.solutions.drawing_utils
 	last_frame_bgr: np.ndarray | None = None
 	user_stopped: bool = False
+	mp4_stop_requested: bool = False
+
+	def _finalize_buffered_trial() -> DiagnosticResult:
+		"""Run kinematic and symmetry analysis for the currently buffered pose window.
+
+		Returns:
+			Diagnostic result computed from the current pose buffer.
+
+		Raises:
+			ValueError: If no valid pose samples are available.
+		"""
+
+		nonlocal trial_counter
+		if len(pose_buffer) == 0:
+			raise ValueError("No valid pose frames available for analysis.")
+
+		left_leg_signal = [sample.left_leg for sample in pose_buffer]
+		right_leg_signal = [sample.right_leg for sample in pose_buffer]
+
+		left_angles = kinematic_analyzer.process_leg_signal(left_leg_signal)
+		right_angles = kinematic_analyzer.process_leg_signal(right_leg_signal)
+
+		result = gait_classifier.evaluate_symmetry(
+			left_angles=left_angles,
+			right_angles=right_angles,
+		)
+		_log_to_csv(result=result, log_path=log_file, trial_num=trial_counter)
+		trial_counter += 1
+		return result
 
 	try:
 		with VideoIngestion(IngestionConfig(source=selected_source, target_fps=target_fps)) as stream:
@@ -242,19 +271,22 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 						if pose_result is not None:
 							pose_buffer.append(pose_result)
 
+						if dashboard.stop_requested:
+							dashboard.stop_requested = False
+							if is_live:
+								if len(pose_buffer) > 0:
+									last_result = _finalize_buffered_trial()
+								current_state = STATE_IDLE
+								pose_buffer.clear()
+								if video_writer is not None:
+									video_writer.release()
+									video_writer = None
+							else:
+								mp4_stop_requested = True
+								break
+
 						if is_live and len(pose_buffer) >= ANALYSIS_WINDOW_FRAMES:
-							left_leg_signal = [sample.left_leg for sample in pose_buffer]
-							right_leg_signal = [sample.right_leg for sample in pose_buffer]
-
-							left_angles = kinematic_analyzer.process_leg_signal(left_leg_signal)
-							right_angles = kinematic_analyzer.process_leg_signal(right_leg_signal)
-
-							last_result = gait_classifier.evaluate_symmetry(
-								left_angles=left_angles,
-								right_angles=right_angles,
-							)
-							_log_to_csv(result=last_result, log_path=log_file, trial_num=trial_counter)
-							trial_counter += 1
+							last_result = _finalize_buffered_trial()
 							current_state = STATE_IDLE
 							pose_buffer.clear()
 							if video_writer is not None:
@@ -273,20 +305,11 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 
 				if (not is_live) and (not user_stopped):
 					if len(pose_buffer) == 0:
-						raise ValueError("No valid pose frames were extracted from the selected MP4 video.")
+						if not mp4_stop_requested:
+							raise ValueError("No valid pose frames were extracted from the selected MP4 video.")
+					else:
+						last_result = _finalize_buffered_trial()
 
-					left_leg_signal = [sample.left_leg for sample in pose_buffer]
-					right_leg_signal = [sample.right_leg for sample in pose_buffer]
-
-					left_angles = kinematic_analyzer.process_leg_signal(left_leg_signal)
-					right_angles = kinematic_analyzer.process_leg_signal(right_leg_signal)
-
-					last_result = gait_classifier.evaluate_symmetry(
-						left_angles=left_angles,
-						right_angles=right_angles,
-					)
-					_log_to_csv(result=last_result, log_path=log_file, trial_num=trial_counter)
-					trial_counter += 1
 					current_state = STATE_IDLE
 
 					if last_frame_bgr is not None and dashboard._is_running:
@@ -297,7 +320,7 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 							recording_state=current_state,
 						)
 
-				# Keep the final MP4 diagnosis visible until the user closes the window.
+					# Keep the final MP4 diagnosis visible until the user closes the window.
 					while dashboard._is_running:
 						dashboard.root.update()
 						time.sleep(0.05)

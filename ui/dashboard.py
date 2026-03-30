@@ -37,6 +37,7 @@ class GaitAnalysisDashboard:
 		self._is_running: bool = True
 		self._photo_ref: ImageTk.PhotoImage | None = None
 		self.start_requested: bool = False
+		self.stop_requested: bool = False
 		self.selected_source: int | str | None = None
 
 		self.selection_frame = ttk.Frame(self.root, style="Dashboard.TFrame", padding=24)
@@ -128,7 +129,7 @@ class GaitAnalysisDashboard:
 
 		ttk.Button(
 			content,
-			text="Upload Pre-recorded Video",
+			text="Upload Video",
 			style="Selection.TButton",
 			command=self._on_select_upload,
 		).pack(fill=tk.X, padx=12, ipady=6)
@@ -177,6 +178,15 @@ class GaitAnalysisDashboard:
 		)
 		self.start_button.pack(fill=tk.X, pady=(16, 0))
 
+		self.stop_button = ttk.Button(
+			right_frame,
+			text="Stop Recording",
+			style="Primary.TButton",
+			command=self._on_stop_clicked,
+		)
+		self.stop_button.pack(fill=tk.X, pady=(10, 0))
+		self.stop_button.config(state="disabled")
+
 	def _on_select_live(self) -> None:
 		"""Select webcam mode and open the dashboard view."""
 
@@ -201,6 +211,13 @@ class GaitAnalysisDashboard:
 		"""Handle the Start Trial button click."""
 		self.start_requested = True
 		self.start_button.config(state="disabled")
+		self.stop_requested = False
+
+	def _on_stop_clicked(self) -> None:
+		"""Handle the Stop Recording button click."""
+
+		self.stop_requested = True
+		self.stop_button.config(state="disabled")
 
 	def _add_metric_row(self, parent: ttk.Frame, name: str, default_value: str) -> ttk.Label:
 		"""Create a named metric row and return its value label."""
@@ -274,10 +291,15 @@ class GaitAnalysisDashboard:
 		if recording_state == "IDLE":
 			self.recording_indicator.configure(text="Waiting...", foreground="#FBBF24")
 			self.start_button.config(state="normal")
+			self.stop_button.config(state="disabled")
 		elif recording_state == "COUNTDOWN":
 			self.recording_indicator.configure(text="Starting...", foreground="#FBBF24")
+			self.start_button.config(state="disabled")
+			self.stop_button.config(state="disabled")
 		elif recording_state == "RECORDING":
 			self.recording_indicator.configure(text="🔴 RECORDING", foreground="#EF4444")
+			self.start_button.config(state="disabled")
+			self.stop_button.config(state="normal")
 
 		if self._is_running:
 			self.root.update_idletasks()
