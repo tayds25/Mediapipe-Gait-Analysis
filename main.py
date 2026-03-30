@@ -296,6 +296,11 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 							buffer_count=len(pose_buffer),
 							recording_state=current_state,
 						)
+
+				# Keep the final MP4 diagnosis visible until the user closes the window.
+					while dashboard._is_running:
+						dashboard.root.update()
+						time.sleep(0.05)
 	except (RuntimeError, ValueError, FileNotFoundError) as exc:
 		print(f"[main] pipeline error: {exc}")
 		return 1
