@@ -9,6 +9,7 @@ dashboard layout.
 from __future__ import annotations
 
 import tkinter as tk
+import tkinter.filedialog as filedialog
 from tkinter import ttk
 from typing import TYPE_CHECKING
 
@@ -36,11 +37,17 @@ class GaitAnalysisDashboard:
 		self._is_running: bool = True
 		self._photo_ref: ImageTk.PhotoImage | None = None
 		self.start_requested: bool = False
+		self.selected_source: int | str | None = None
 
-		self._build_layout()
+		self.selection_frame = ttk.Frame(self.root, style="Dashboard.TFrame", padding=24)
+		self.dashboard_frame = ttk.Frame(self.root, style="Dashboard.TFrame", padding=12)
 
-	def _build_layout(self) -> None:
-		"""Construct and style the dashboard layout."""
+		self._build_selection_layout()
+		self._build_dashboard_layout()
+		self.selection_frame.pack(fill=tk.BOTH, expand=True)
+
+	def _configure_styles(self) -> None:
+		"""Configure reusable styles for the selection and dashboard layouts."""
 
 		self.root.configure(bg="#27374D")
 		style = ttk.Style(self.root)
@@ -81,8 +88,55 @@ class GaitAnalysisDashboard:
 			background=[("active", "#5E7B93"), ("pressed", "#42586B"), ("disabled", "#3A4D5F")],
 			foreground=[("disabled", "#D1D5DB")],
 		)
+		style.configure(
+			"SelectionTitle.TLabel",
+			background="#27374D",
+			foreground="#FFFFFF",
+			font=("Segoe UI", 28, "bold"),
+		)
+		style.configure(
+			"Selection.TButton",
+			background="#526D82",
+			foreground="#FFFFFF",
+			borderwidth=0,
+			focusthickness=0,
+			focuscolor="#526D82",
+			font=("Segoe UI", 14, "bold"),
+			padding=(18, 18),
+		)
+		style.map(
+			"Selection.TButton",
+			background=[("active", "#5E7B93"), ("pressed", "#42586B")],
+		)
 
-		container = ttk.Frame(self.root, style="Dashboard.TFrame", padding=12)
+	def _build_selection_layout(self) -> None:
+		"""Construct the startup source-selection screen."""
+
+		self._configure_styles()
+
+		content = ttk.Frame(self.selection_frame, style="Dashboard.TFrame")
+		content.place(relx=0.5, rely=0.5, anchor="center")
+
+		ttk.Label(content, text="Select Data Source", style="SelectionTitle.TLabel").pack(pady=(0, 32))
+
+		ttk.Button(
+			content,
+			text="Live Webcam Trial",
+			style="Selection.TButton",
+			command=self._on_select_live,
+		).pack(fill=tk.X, padx=12, pady=(0, 16), ipady=6)
+
+		ttk.Button(
+			content,
+			text="Upload Pre-recorded Video",
+			style="Selection.TButton",
+			command=self._on_select_upload,
+		).pack(fill=tk.X, padx=12, ipady=6)
+
+	def _build_dashboard_layout(self) -> None:
+		"""Construct and style the analysis dashboard layout."""
+
+		container = ttk.Frame(self.dashboard_frame, style="Dashboard.TFrame", padding=12)
 		container.pack(fill=tk.BOTH, expand=True)
 
 		left_frame = ttk.Frame(container, style="Panel.TFrame", padding=10)
@@ -122,6 +176,26 @@ class GaitAnalysisDashboard:
 			command=self._on_start_clicked,
 		)
 		self.start_button.pack(fill=tk.X, pady=(16, 0))
+
+	def _on_select_live(self) -> None:
+		"""Select webcam mode and open the dashboard view."""
+
+		self.selected_source = 0
+		self._switch_to_dashboard()
+
+	def _on_select_upload(self) -> None:
+		"""Prompt for an MP4 file and open the dashboard when selected."""
+
+		file_path = filedialog.askopenfilename(filetypes=[("MP4 Videos", "*.mp4")])
+		if file_path:
+			self.selected_source = file_path
+			self._switch_to_dashboard()
+
+	def _switch_to_dashboard(self) -> None:
+		"""Hide the source-selection screen and display the main dashboard."""
+
+		self.selection_frame.pack_forget()
+		self.dashboard_frame.pack(fill=tk.BOTH, expand=True)
 
 	def _on_start_clicked(self) -> None:
 		"""Handle the Start Trial button click."""
@@ -231,6 +305,8 @@ def _run_dashboard_smoke_test() -> int:
 	"""Run a basic dashboard smoke test with a synthetic black frame."""
 
 	dashboard = GaitAnalysisDashboard()
+	dashboard.selected_source = 0
+	dashboard._switch_to_dashboard()
 	blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
 	dashboard.update_display(frame_bgr=blank_frame, diagnostic_result=None, buffer_count=0)
 	dashboard.start()

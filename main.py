@@ -130,13 +130,28 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 	kinematic_analyzer = KinematicAnalyzer(visibility_threshold=0.5)
 	gait_classifier = GaitClassifier(abnormal_threshold=10.0)
 	dashboard = GaitAnalysisDashboard()
+	while dashboard.selected_source is None and dashboard._is_running:
+		dashboard.root.update()
+		time.sleep(0.05)
+
+	if not dashboard._is_running:
+		return 0
+
+	selected_source: int | str = dashboard.selected_source if dashboard.selected_source is not None else source
+	is_live = isinstance(selected_source, int)
+	if not is_live:
+		dashboard.start_button.pack_forget()
+		current_state = STATE_RECORDING
 
 	drawing_utils = mp.solutions.drawing_utils
+	last_frame_bgr: np.ndarray | None = None
+	user_stopped: bool = False
 
 	try:
-		with VideoIngestion(IngestionConfig(source=source, target_fps=target_fps)) as stream:
+		with VideoIngestion(IngestionConfig(source=selected_source, target_fps=target_fps)) as stream:
 			with PoseEstimator() as pose_estimator:
 				for packet in stream.frames():
+					last_frame_bgr = packet.frame_bgr.copy()
 					pose_result = pose_estimator.process_frame(packet.frame_bgr)
 
 					if pose_estimator.last_pose_landmarks is not None:
@@ -146,13 +161,13 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 							mp.solutions.pose.POSE_CONNECTIONS,
 						)
 
-					if dashboard.start_requested and current_state == STATE_IDLE:
+					if is_live and dashboard.start_requested and current_state == STATE_IDLE:
 						current_state = STATE_COUNTDOWN
 						countdown_start_time = time.perf_counter()
 						dashboard.start_requested = False
 						pose_buffer.clear()
 
-					if current_state == STATE_COUNTDOWN:
+					if is_live and current_state == STATE_COUNTDOWN:
 						elapsed = time.perf_counter() - countdown_start_time
 						countdown_time = max(0.0, COUNTDOWN_DURATION - elapsed)
 						if countdown_time > 0:
@@ -210,23 +225,24 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 								raise RuntimeError(f"Failed to open video writer at: {save_path}")
 
 					if current_state == STATE_RECORDING:
-						if video_writer is not None:
+						if is_live and video_writer is not None:
 							video_writer.write(packet.frame_bgr)
 
-						cv2.putText(
-							packet.frame_bgr,
-							"REC",
-							(packet.frame_bgr.shape[1] - 120, 40),
-							cv2.FONT_HERSHEY_SIMPLEX,
-							1.2,
-							(0, 0, 255),
-							2,
-						)
+						if is_live:
+							cv2.putText(
+								packet.frame_bgr,
+								"REC",
+								(packet.frame_bgr.shape[1] - 120, 40),
+								cv2.FONT_HERSHEY_SIMPLEX,
+								1.2,
+								(0, 0, 255),
+								2,
+							)
 
 						if pose_result is not None:
 							pose_buffer.append(pose_result)
 
-						if len(pose_buffer) >= ANALYSIS_WINDOW_FRAMES:
+						if is_live and len(pose_buffer) >= ANALYSIS_WINDOW_FRAMES:
 							left_leg_signal = [sample.left_leg for sample in pose_buffer]
 							right_leg_signal = [sample.right_leg for sample in pose_buffer]
 
@@ -252,7 +268,34 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 						recording_state=current_state,
 					)
 					if not dashboard._is_running:
+						user_stopped = True
 						break
+
+				if (not is_live) and (not user_stopped):
+					if len(pose_buffer) == 0:
+						raise ValueError("No valid pose frames were extracted from the selected MP4 video.")
+
+					left_leg_signal = [sample.left_leg for sample in pose_buffer]
+					right_leg_signal = [sample.right_leg for sample in pose_buffer]
+
+					left_angles = kinematic_analyzer.process_leg_signal(left_leg_signal)
+					right_angles = kinematic_analyzer.process_leg_signal(right_leg_signal)
+
+					last_result = gait_classifier.evaluate_symmetry(
+						left_angles=left_angles,
+						right_angles=right_angles,
+					)
+					_log_to_csv(result=last_result, log_path=log_file, trial_num=trial_counter)
+					trial_counter += 1
+					current_state = STATE_IDLE
+
+					if last_frame_bgr is not None and dashboard._is_running:
+						dashboard.update_display(
+							frame_bgr=last_frame_bgr,
+							diagnostic_result=last_result,
+							buffer_count=len(pose_buffer),
+							recording_state=current_state,
+						)
 	except (RuntimeError, ValueError, FileNotFoundError) as exc:
 		print(f"[main] pipeline error: {exc}")
 		return 1
