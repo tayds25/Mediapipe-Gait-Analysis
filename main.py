@@ -176,154 +176,191 @@ def run_pipeline(source: int | str = 0, target_fps: float = 30.0) -> int:
 		trial_counter += 1
 		return result
 
+	def _await_next_upload_source() -> str | None:
+		"""Wait for the next-trial action and return a selected MP4 path."""
+
+		while dashboard._is_running:
+			while dashboard._is_running and (not dashboard.next_trial_requested):
+				dashboard.root.update()
+				time.sleep(0.05)
+
+			if not dashboard._is_running:
+				return None
+
+			dashboard.next_trial_requested = False
+			next_path = dashboard.choose_upload_video()
+			if next_path:
+				return next_path
+			dashboard.show_next_trial_button(True)
+
+		return None
+
 	try:
-		with VideoIngestion(IngestionConfig(source=selected_source, target_fps=target_fps)) as stream:
-			with PoseEstimator() as pose_estimator:
-				for packet in stream.frames():
-					last_frame_bgr = packet.frame_bgr.copy()
-					pose_result = pose_estimator.process_frame(packet.frame_bgr)
+		with PoseEstimator() as pose_estimator:
+			while dashboard._is_running:
+				user_stopped = False
+				mp4_stop_requested = False
 
-					if pose_estimator.last_pose_landmarks is not None:
-						drawing_utils.draw_landmarks(
-							packet.frame_bgr,
-							pose_estimator.last_pose_landmarks,
-							mp.solutions.pose.POSE_CONNECTIONS,
-						)
+				if not is_live:
+					current_state = STATE_RECORDING
+					pose_buffer.clear()
+					dashboard.stop_requested = False
+					dashboard.start_requested = False
+					dashboard.show_next_trial_button(False)
+					last_result = None
 
-					if is_live and dashboard.start_requested and current_state == STATE_IDLE:
-						current_state = STATE_COUNTDOWN
-						countdown_start_time = time.perf_counter()
-						dashboard.start_requested = False
-						pose_buffer.clear()
+				with VideoIngestion(IngestionConfig(source=selected_source, target_fps=target_fps)) as stream:
+					for packet in stream.frames():
+						last_frame_bgr = packet.frame_bgr.copy()
+						pose_result = pose_estimator.process_frame(packet.frame_bgr)
 
-					if is_live and current_state == STATE_COUNTDOWN:
-						elapsed = time.perf_counter() - countdown_start_time
-						countdown_time = max(0.0, COUNTDOWN_DURATION - elapsed)
-						if countdown_time > 0:
-							seconds_left = int(np.ceil(countdown_time))
-							countdown_text = f"Starting in: {seconds_left}"
-							text_size, baseline = cv2.getTextSize(
-								countdown_text,
-								cv2.FONT_HERSHEY_SIMPLEX,
-								0.8,
-								2,
-							)
-							text_width, text_height = text_size
-							padding = 15
-							badge_width = text_width + (2 * padding)
-							badge_height = text_height + (2 * padding)
-
-							frame_height, frame_width = packet.frame_bgr.shape[:2]
-							badge_x1 = max((frame_width - badge_width) // 2, 0)
-							badge_y1 = max(int(0.05 * frame_height), 0)
-							badge_x2 = min(badge_x1 + badge_width, frame_width)
-							badge_y2 = min(badge_y1 + badge_height, frame_height)
-
-							cv2.rectangle(
+						if pose_estimator.last_pose_landmarks is not None:
+							drawing_utils.draw_landmarks(
 								packet.frame_bgr,
-								(badge_x1, badge_y1),
-								(badge_x2, badge_y2),
-								(40, 40, 40),
-								thickness=-1,
+								pose_estimator.last_pose_landmarks,
+								mp.solutions.pose.POSE_CONNECTIONS,
 							)
 
-							text_x = badge_x1 + (badge_width - text_width) // 2
-							text_y = badge_y1 + padding + text_height
-							cv2.putText(
-								packet.frame_bgr,
-								countdown_text,
-								(text_x, text_y),
-								cv2.FONT_HERSHEY_SIMPLEX,
-								0.8,
-								(255, 255, 255),
-								2,
-								cv2.LINE_AA,
-							)
-						else:
-							current_state = STATE_RECORDING
-							filename = f"recording_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
-							save_path = str(live_recordings_dir / filename)
-							frame_size = (packet.frame_bgr.shape[1], packet.frame_bgr.shape[0])
-							video_writer = cv2.VideoWriter(
-								save_path,
-								cv2.VideoWriter_fourcc(*"mp4v"),
-								target_fps,
-								frame_size,
-							)
-							if not video_writer.isOpened():
-								raise RuntimeError(f"Failed to open video writer at: {save_path}")
+						if is_live and dashboard.start_requested and current_state == STATE_IDLE:
+							current_state = STATE_COUNTDOWN
+							countdown_start_time = time.perf_counter()
+							dashboard.start_requested = False
+							pose_buffer.clear()
 
-					if current_state == STATE_RECORDING:
-						if is_live and video_writer is not None:
-							video_writer.write(packet.frame_bgr)
+						if is_live and current_state == STATE_COUNTDOWN:
+							elapsed = time.perf_counter() - countdown_start_time
+							countdown_time = max(0.0, COUNTDOWN_DURATION - elapsed)
+							if countdown_time > 0:
+								seconds_left = int(np.ceil(countdown_time))
+								countdown_text = f"Starting in: {seconds_left}"
+								text_size, baseline = cv2.getTextSize(
+									countdown_text,
+									cv2.FONT_HERSHEY_SIMPLEX,
+									0.8,
+									2,
+								)
+								text_width, text_height = text_size
+								padding = 15
+								badge_width = text_width + (2 * padding)
+								badge_height = text_height + (2 * padding)
 
-						if is_live:
-							cv2.putText(
-								packet.frame_bgr,
-								"REC",
-								(packet.frame_bgr.shape[1] - 120, 40),
-								cv2.FONT_HERSHEY_SIMPLEX,
-								1.2,
-								(0, 0, 255),
-								2,
-							)
+								frame_height, frame_width = packet.frame_bgr.shape[:2]
+								badge_x1 = max((frame_width - badge_width) // 2, 0)
+								badge_y1 = max(int(0.05 * frame_height), 0)
+								badge_x2 = min(badge_x1 + badge_width, frame_width)
+								badge_y2 = min(badge_y1 + badge_height, frame_height)
 
-						if pose_result is not None:
-							pose_buffer.append(pose_result)
+								cv2.rectangle(
+									packet.frame_bgr,
+									(badge_x1, badge_y1),
+									(badge_x2, badge_y2),
+									(40, 40, 40),
+									thickness=-1,
+								)
 
-						if dashboard.stop_requested:
-							dashboard.stop_requested = False
+								text_x = badge_x1 + (badge_width - text_width) // 2
+								text_y = badge_y1 + padding + text_height
+								cv2.putText(
+									packet.frame_bgr,
+									countdown_text,
+									(text_x, text_y),
+									cv2.FONT_HERSHEY_SIMPLEX,
+									0.8,
+									(255, 255, 255),
+									2,
+									cv2.LINE_AA,
+								)
+							else:
+								current_state = STATE_RECORDING
+								filename = f"recording_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+								save_path = str(live_recordings_dir / filename)
+								frame_size = (packet.frame_bgr.shape[1], packet.frame_bgr.shape[0])
+								writer = cv2.VideoWriter(
+									save_path,
+									cv2.VideoWriter_fourcc(*"mp4v"),
+									target_fps,
+									frame_size,
+								)
+								if (writer is None) or (not writer.isOpened()):
+									raise RuntimeError(f"Failed to open video writer at: {save_path}")
+								video_writer = writer
+
+						if current_state == STATE_RECORDING:
+							if is_live and video_writer is not None:
+								video_writer.write(packet.frame_bgr)
+
 							if is_live:
-								if len(pose_buffer) > 0:
-									last_result = _finalize_buffered_trial()
+								cv2.putText(
+									packet.frame_bgr,
+									"REC",
+									(packet.frame_bgr.shape[1] - 120, 40),
+									cv2.FONT_HERSHEY_SIMPLEX,
+									1.2,
+									(0, 0, 255),
+									2,
+								)
+
+							if pose_result is not None:
+								pose_buffer.append(pose_result)
+
+							if dashboard.stop_requested:
+								dashboard.stop_requested = False
+								if is_live:
+									if len(pose_buffer) > 0:
+										last_result = _finalize_buffered_trial()
+									current_state = STATE_IDLE
+									pose_buffer.clear()
+									if video_writer is not None:
+										video_writer.release()
+										video_writer = None
+								else:
+									mp4_stop_requested = True
+									break
+
+							if is_live and len(pose_buffer) >= ANALYSIS_WINDOW_FRAMES:
+								last_result = _finalize_buffered_trial()
 								current_state = STATE_IDLE
 								pose_buffer.clear()
 								if video_writer is not None:
 									video_writer.release()
 									video_writer = None
-							else:
-								mp4_stop_requested = True
-								break
 
-						if is_live and len(pose_buffer) >= ANALYSIS_WINDOW_FRAMES:
-							last_result = _finalize_buffered_trial()
-							current_state = STATE_IDLE
-							pose_buffer.clear()
-							if video_writer is not None:
-								video_writer.release()
-								video_writer = None
-
-					dashboard.update_display(
-						frame_bgr=packet.frame_bgr,
-						diagnostic_result=last_result,
-						buffer_count=len(pose_buffer),
-						recording_state=current_state,
-					)
-					if not dashboard._is_running:
-						user_stopped = True
-						break
-
-				if (not is_live) and (not user_stopped):
-					if len(pose_buffer) == 0:
-						if not mp4_stop_requested:
-							raise ValueError("No valid pose frames were extracted from the selected MP4 video.")
-					else:
-						last_result = _finalize_buffered_trial()
-
-					current_state = STATE_IDLE
-
-					if last_frame_bgr is not None and dashboard._is_running:
 						dashboard.update_display(
-							frame_bgr=last_frame_bgr,
+							frame_bgr=packet.frame_bgr,
 							diagnostic_result=last_result,
 							buffer_count=len(pose_buffer),
 							recording_state=current_state,
 						)
+						if not dashboard._is_running:
+							user_stopped = True
+							break
 
-					# Keep the final MP4 diagnosis visible until the user closes the window.
-					while dashboard._is_running:
-						dashboard.root.update()
-						time.sleep(0.05)
+				if user_stopped:
+					break
+
+				if is_live:
+					break
+
+				if len(pose_buffer) == 0:
+					if not mp4_stop_requested:
+						raise ValueError("No valid pose frames were extracted from the selected MP4 video.")
+				else:
+					last_result = _finalize_buffered_trial()
+
+				current_state = STATE_IDLE
+
+				if last_frame_bgr is not None and dashboard._is_running:
+					dashboard.update_display(
+						frame_bgr=last_frame_bgr,
+						diagnostic_result=last_result,
+						buffer_count=len(pose_buffer),
+						recording_state=current_state,
+					)
+
+				next_source = _await_next_upload_source()
+				if next_source is None:
+					break
+				selected_source = next_source
 	except (RuntimeError, ValueError, FileNotFoundError) as exc:
 		print(f"[main] pipeline error: {exc}")
 		return 1

@@ -38,6 +38,7 @@ class GaitAnalysisDashboard:
 		self._photo_ref: ImageTk.PhotoImage | None = None
 		self.start_requested: bool = False
 		self.stop_requested: bool = False
+		self.next_trial_requested: bool = False
 		self.selected_source: int | str | None = None
 
 		self.selection_frame = ttk.Frame(self.root, style="Dashboard.TFrame", padding=24)
@@ -187,6 +188,13 @@ class GaitAnalysisDashboard:
 		self.stop_button.pack(fill=tk.X, pady=(10, 0))
 		self.stop_button.config(state="disabled")
 
+		self.next_trial_button = ttk.Button(
+			right_frame,
+			text="Next Trial",
+			style="Primary.TButton",
+			command=self._on_next_trial_clicked,
+		)
+
 	def _on_select_live(self) -> None:
 		"""Select webcam mode and open the dashboard view."""
 
@@ -196,7 +204,7 @@ class GaitAnalysisDashboard:
 	def _on_select_upload(self) -> None:
 		"""Prompt for an MP4 file and open the dashboard when selected."""
 
-		file_path = filedialog.askopenfilename(filetypes=[("MP4 Videos", "*.mp4")])
+		file_path = self.choose_upload_video()
 		if file_path:
 			self.selected_source = file_path
 			self._switch_to_dashboard()
@@ -210,14 +218,40 @@ class GaitAnalysisDashboard:
 	def _on_start_clicked(self) -> None:
 		"""Handle the Start Trial button click."""
 		self.start_requested = True
+		self.next_trial_requested = False
 		self.start_button.config(state="disabled")
 		self.stop_requested = False
+		self.show_next_trial_button(False)
 
 	def _on_stop_clicked(self) -> None:
 		"""Handle the Stop Recording button click."""
 
 		self.stop_requested = True
 		self.stop_button.config(state="disabled")
+
+	def _on_next_trial_clicked(self) -> None:
+		"""Handle the Next Trial button click."""
+
+		self.next_trial_requested = True
+		self.start_requested = True
+		self.next_trial_button.config(state="disabled")
+
+	def show_next_trial_button(self, should_show: bool) -> None:
+		"""Show or hide the Next Trial button in the sidebar."""
+
+		if should_show:
+			if not self.next_trial_button.winfo_ismapped():
+				self.next_trial_button.pack(fill=tk.X, pady=(10, 0))
+			self.next_trial_button.config(state="normal")
+		else:
+			if self.next_trial_button.winfo_ismapped():
+				self.next_trial_button.pack_forget()
+
+	def choose_upload_video(self) -> str | None:
+		"""Open a picker for MP4 upload and return the chosen path."""
+
+		file_path = filedialog.askopenfilename(filetypes=[("MP4 Videos", "*.mp4")])
+		return file_path or None
 
 	def _add_metric_row(self, parent: ttk.Frame, name: str, default_value: str) -> ttk.Label:
 		"""Create a named metric row and return its value label."""
@@ -300,6 +334,9 @@ class GaitAnalysisDashboard:
 			self.recording_indicator.configure(text="🔴 RECORDING", foreground="#EF4444")
 			self.start_button.config(state="disabled")
 			self.stop_button.config(state="normal")
+
+		show_next_trial = recording_state == "IDLE" and diagnostic_result is not None
+		self.show_next_trial_button(show_next_trial)
 
 		if self._is_running:
 			self.root.update_idletasks()
